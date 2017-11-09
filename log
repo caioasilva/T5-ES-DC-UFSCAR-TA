@@ -1,0 +1,167 @@
+commit c360278380d8a0e73299b4f11038ce909c0abc16
+Author: Siedlerchr <siedlerkiller@gmail.com>
+Date:   Fri Oct 27 12:05:30 2017 +0200
+
+    Improve preferences handling
+    Improve equals and hashcode in DBMSProperties
+
+diff --git a/src/main/java/org/jabref/gui/sharelatex/ShareLatexLoginDialogController.java b/src/main/java/org/jabref/gui/sharelatex/ShareLatexLoginDialogController.java
+index 9babcabd3..f993a8239 100644
+--- a/src/main/java/org/jabref/gui/sharelatex/ShareLatexLoginDialogController.java
++++ b/src/main/java/org/jabref/gui/sharelatex/ShareLatexLoginDialogController.java
+@@ -15,12 +15,13 @@ import org.jabref.gui.FXDialog;
+ import org.jabref.gui.FXDialogService;
+ import org.jabref.logic.sharelatex.ShareLatexManager;
+ import org.jabref.logic.sharelatex.SharelatexConnectionProperties;
++import org.jabref.logic.sharelatex.SharelatexPreferences;
+ 
+ public class ShareLatexLoginDialogController extends AbstractController<ShareLatexLoginDialogViewModel> {
+ 
+     @FXML private TextField tbAddress;
+     @FXML private TextField tbUsername;
+-    @FXML private PasswordField pfPassword;
++    @FXML private PasswordField tbPassword;
+     @FXML private Button btnLogin;
+     @Inject private ShareLatexManager manager;
+ 
+@@ -40,14 +41,20 @@ public class ShareLatexLoginDialogController extends AbstractController<ShareLat
+     private void signIn() {
+         btnLogin.setText("Logging in....");
+         try {
+-            String result = manager.login(tbAddress.getText(), tbUsername.getText(), pfPassword.getText());
++            String result = manager.login(tbAddress.getText(), tbUsername.getText(), tbPassword.getText());
+             if (result.contains("incorrect")) {
+                 FXDialog dlg = new FXDialog(AlertType.ERROR);
+                 dlg.setContentText("Your email or password is incorrect. Please try again");
+                 dlg.showAndWait();
+             } else {
+                 //TODO: Wait until pdf + injection stuff gets merged
+-                props = new SharelatexConnectionProperties(tbAddress.getText(), tbUsername.getText(), pfPassword.getText(), "default");
++                props = new SharelatexConnectionProperties(new SharelatexPreferences("default"));
++                props.setUrl(tbAddress.getText());
++                props.setUser(tbUsername.getText());
++                props.setPassword(tbPassword.getText());
++
++                manager.setConnectionProperties(props);
++
+                 ShareLatexProjectDialogView dlgprojects = new ShareLatexProjectDialogView();
+                 dlgprojects.show();
+                 closeDialog();
+diff --git a/src/main/java/org/jabref/logic/sharelatex/ShareLatexManager.java b/src/main/java/org/jabref/logic/sharelatex/ShareLatexManager.java
+index 3ef2802ef..fcf8e34bf 100644
+--- a/src/main/java/org/jabref/logic/sharelatex/ShareLatexManager.java
++++ b/src/main/java/org/jabref/logic/sharelatex/ShareLatexManager.java
+@@ -24,6 +24,7 @@ public class ShareLatexManager {
+ 
+     private final SharelatexConnector connector = new SharelatexConnector();
+     private final ShareLatexParser parser = new ShareLatexParser();
++    private SharelatexConnectionProperties properties;
+ 
+     public String login(String server, String username, String password) throws IOException {
+         return connector.connectToServer(server, username, password);
+@@ -73,4 +74,12 @@ public class ShareLatexManager {
+     public void disconnectAndCloseConnection() {
+         connector.disconnectAndCloseConn();
+     }
++
++    public void setConnectionProperties(SharelatexConnectionProperties props) {
++        this.properties = props;
++    }
++
++    public SharelatexConnectionProperties getConnectionProperties() {
++        return this.properties;
++    }
+ }
+diff --git a/src/main/java/org/jabref/logic/sharelatex/SharelatexConnectionProperties.java b/src/main/java/org/jabref/logic/sharelatex/SharelatexConnectionProperties.java
+index 64ef0d04e..a0b0e5428 100644
+--- a/src/main/java/org/jabref/logic/sharelatex/SharelatexConnectionProperties.java
++++ b/src/main/java/org/jabref/logic/sharelatex/SharelatexConnectionProperties.java
+@@ -32,6 +32,22 @@ public class SharelatexConnectionProperties {
+         this.project = project;
+     }
+ 
++    public void setUser(String user) {
++        this.user = user;
++    }
++
++    public void setPassword(String password) {
++        this.password = password;
++    }
++
++    public void setUrl(String url) {
++        this.url = url;
++    }
++
++    public void setProject(String project) {
++        this.project = project;
++    }
++
+     public String getUser() {
+         return user;
+     }
+diff --git a/src/main/java/org/jabref/shared/DBMSConnectionProperties.java b/src/main/java/org/jabref/shared/DBMSConnectionProperties.java
+index 181618197..e8cc98dbc 100644
+--- a/src/main/java/org/jabref/shared/DBMSConnectionProperties.java
++++ b/src/main/java/org/jabref/shared/DBMSConnectionProperties.java
+@@ -24,7 +24,6 @@ public class DBMSConnectionProperties {
+     private String user;
+     private String password;
+ 
+-
+     public DBMSConnectionProperties() {
+         // no data
+     }
+@@ -94,12 +93,28 @@ public class DBMSConnectionProperties {
+     /**
+      * Compares all properties except the password.
+      */
+-    public boolean equals(DBMSConnectionProperties properties) {
+-        return this.type.equals(properties.getType())
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) {
++            return true;
++        }
++        if ((o == null) || (getClass() != o.getClass())) {
++            return false;
++        }
++
++        DBMSConnectionProperties properties = (DBMSConnectionProperties) o;
++
++        return Objects.equals(this.type, properties.type)
+                 && this.host.equalsIgnoreCase(properties.getHost())
+-                && (this.port == properties.getPort())
+-                && this.database.equals(properties.getDatabase())
+-                && this.user.equals(properties.getUser());
++                && Objects.equals(this.port, properties.port)
++                && Objects.equals(this.database, properties.database)
++                && Objects.equals(this.user, properties.user);
++    }
++
++    @Override
++    public int hashCode() {
++        return Objects.hash(host, port, database, user);
+     }
+ 
+     /**
+diff --git a/src/main/resources/org/jabref/gui/sharelatex/ShareLatexLoginDialog.fxml b/src/main/resources/org/jabref/gui/sharelatex/ShareLatexLoginDialog.fxml
+index 0ba469626..b2efa9b88 100644
+--- a/src/main/resources/org/jabref/gui/sharelatex/ShareLatexLoginDialog.fxml
++++ b/src/main/resources/org/jabref/gui/sharelatex/ShareLatexLoginDialog.fxml
+@@ -31,7 +31,7 @@
+                   <TextField id="tbUsername" fx:id="tbUsername" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+                   <Label alignment="CENTER_RIGHT" text="%Username" GridPane.rowIndex="1" />
+                   <Label text="%Password" GridPane.rowIndex="2" />
+-                  <PasswordField id="tbPassword" fx:id="pfPassword" GridPane.columnIndex="1" GridPane.rowIndex="2" />
++                  <PasswordField id="tbPassword" fx:id="tbPassword" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+            
+                </children>
+             </GridPane>
+
+commit 48dc38560604494646e21ebd607bdb3f9618f11f
+Merge: 67f08a9b2 3d4b5104d
+Author: Oliver Kopp <kopp.dev@gmail.com>
+Date:   Thu Oct 26 11:46:17 2017 +0200
+
+    Merge remote-tracking branch 'origin/master' into sharelatex
